@@ -84,9 +84,9 @@ WriterCompareTriangle::cutscene(int                     nbVertices,
     unsigned int x = 0;
     for (unsigned int z = 0; z < nbVerticesZ; ++z)
     {
-        while (x < nbVerticesX && x >= 0)
+        while (x < nbVerticesX)
         {
-            while (y < nbVerticesY && y >= 0)
+            while (y < nbVerticesY)
             {
                 osg::BoundingBox::value_type xMin = sceneBox.xMin() + x * blocX;
                 if (x == 0) //to prevent from mesh with no case
