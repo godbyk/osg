@@ -636,13 +636,38 @@ struct ReplaceAlphaWithLuminanceOperator
 
     inline void luminance(float&) const {}
     inline void alpha(float&) const {}
-    inline void luminance_alpha(float& l,float& a) const { a= l; }
+    inline void luminance_alpha(float& l,float& a) const { a = l; }
     inline void rgb(float&,float&,float&) const { }
     inline void rgba(float& r,float& g,float& b,float& a) const { float l = (r+g+b)*0.3333333; a = l; }
 };
 
 osg::Image* colorSpaceConversion(ColorSpaceOperation op, osg::Image* image, const osg::Vec4& colour)
 {
+    GLenum requiredPixelFormat = image->getPixelFormat();
+    switch(op)
+    {
+        case (MODULATE_ALPHA_BY_LUMINANCE):
+        case (MODULATE_ALPHA_BY_COLOR):
+        case (REPLACE_ALPHA_WITH_LUMINANCE):
+            if (image->getPixelFormat()==GL_RGB || image->getPixelFormat()==GL_BGR) requiredPixelFormat = GL_RGBA;
+            break;
+        case (REPLACE_RGB_WITH_LUMINANCE):
+            if (image->getPixelFormat()==GL_RGB || image->getPixelFormat()==GL_BGR) requiredPixelFormat = GL_LUMINANCE;
+            break;
+        default:
+            break;
+    }
+
+    if (requiredPixelFormat!=image->getPixelFormat())
+    {
+        osg::Image* newImage = new osg::Image;
+        newImage->allocateImage(image->s(), image->t(), image->r(), requiredPixelFormat, image->getDataType());
+        osg::copyImage(image, 0, 0, 0, image->s(), image->t(), image->r(),
+                    newImage, 0, 0, 0, false);
+
+        image = newImage;
+    }
+
     switch(op)
     {
         case (MODULATE_ALPHA_BY_LUMINANCE):
@@ -665,12 +690,9 @@ osg::Image* colorSpaceConversion(ColorSpaceOperation op, osg::Image* image, cons
         }
         case (REPLACE_RGB_WITH_LUMINANCE):
         {
-            OSG_NOTICE<<"doing conversion REPLACE_ALPHA_WITH_LUMINANCE"<<std::endl;
-            osg::Image* newImage = new osg::Image;
-            newImage->allocateImage(image->s(), image->t(), image->r(), GL_LUMINANCE, image->getDataType());
-            osg::copyImage(image, 0, 0, 0, image->s(), image->t(), image->r(),
-                        newImage, 0, 0, 0, false);
-            return newImage;
+            OSG_NOTICE<<"doing conversion REPLACE_RGB_WITH_LUMINANCE"<<std::endl;
+            // no work here required to be done as it'll already be done by copyImage above.
+            return image;
         }
         default:
             return image;
