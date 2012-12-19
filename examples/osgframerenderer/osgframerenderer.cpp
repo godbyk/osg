@@ -17,7 +17,8 @@
 
 struct ScreenShot : public osg::Camera::DrawCallback
 {
-    ScreenShot(bool flip):
+    ScreenShot(GLenum pixelFormat, bool flip):
+        _pixelFormat(pixelFormat),
         _flip(flip) {}
 
     virtual void operator () (osg::RenderInfo& renderInfo) const
@@ -41,13 +42,13 @@ struct ScreenShot : public osg::Camera::DrawCallback
         osg::Viewport* viewport = camera ? camera->getViewport() : 0;
         if (viewport)
         {
-            OSG_NOTICE<<"Doing read of ="<<viewport->x()<<", "<<viewport->y()<<", "<<viewport->width()<<", "<<viewport->height()<<std::endl;
+            OSG_NOTICE<<"Doing read of ="<<viewport->x()<<", "<<viewport->y()<<", "<<viewport->width()<<", "<<viewport->height()<<" with pixelFormat=0x"<<std::hex<<_pixelFormat<<std::dec<<std::endl;
 
             glReadBuffer(camera->getDrawBuffer());
             osg::ref_ptr<osg::Image> image = new osg::Image;
             
             image->readPixels(viewport->x(),viewport->y(),viewport->width(),viewport->height(),
-                              GL_RGB, GL_UNSIGNED_BYTE, 1);
+                              _pixelFormat, GL_UNSIGNED_BYTE, 1);
 
             if (_flip) image->flipVertical();
 
@@ -58,6 +59,7 @@ struct ScreenShot : public osg::Camera::DrawCallback
 
     typedef std::map<const osg::Camera*, unsigned int> CameraNumMap;
 
+    GLenum                                      _pixelFormat;
     bool                                        _flip;
     osg::ref_ptr<gsc::CaptureSettings>          _frameCapture;
     CameraNumMap                                _cameraNumMap;
@@ -239,8 +241,13 @@ int main( int argc, char **argv )
     unsigned int height = 512;
     if (arguments.read("--height",height)) fc->setHeight(height);
 
+    if (arguments.read("--rgb")) fc->setPixelFormat(gsc::CaptureSettings::RGB);
+    if (arguments.read("--rgba")) fc->setPixelFormat(gsc::CaptureSettings::RGBA);
     
-    
+    osg::Vec4 clearColor(0.0f,0.0f,0.0f,0.0f);
+    while (arguments.read("--clear-color",clearColor[0],clearColor[1],clearColor[2],clearColor[3])) {}
+
+
     unsigned int samples = 0;
     if (arguments.read("--samples",samples)) fc->setSamples(samples);
 
@@ -359,15 +366,12 @@ int main( int argc, char **argv )
     {
         osg::ref_ptr<osg::DisplaySettings> ds = new osg::DisplaySettings;
 
-        osg::DisplaySettings::StereoMode stereoMode = osg::DisplaySettings::HORIZONTAL_SPLIT;
-        switch(fc->getStereoMode())
-        {
-            case(gsc::CaptureSettings::HORIZONTAL_SPLIT): stereoMode = osg::DisplaySettings::HORIZONTAL_SPLIT; break;
-            case(gsc::CaptureSettings::VERTICAL_SPLIT): stereoMode = osg::DisplaySettings::VERTICAL_SPLIT; break;
-            default: break;
-        }
+        bool stereo = fc->getStereoMode()!=gsc::CaptureSettings::OFF;
+        osg::DisplaySettings::StereoMode stereoMode = fc->getStereoMode()==gsc::CaptureSettings::VERTICAL_SPLIT ? osg::DisplaySettings::VERTICAL_SPLIT : osg::DisplaySettings::HORIZONTAL_SPLIT;
+        double fovx_multiple = fc->getStereoMode()==gsc::CaptureSettings::HORIZONTAL_SPLIT ? 2.0 : 1;
+        double fovy_multiple = fc->getStereoMode()==gsc::CaptureSettings::VERTICAL_SPLIT ? 2.0 : 1;
         ds->setStereoMode(stereoMode);
-        ds->setStereo(fc->getStereoMode()!=gsc::CaptureSettings::OFF);
+        ds->setStereo(stereo);
 
         if (fc->getScreenWidth()!=0.0) ds->setScreenWidth(fc->getScreenWidth());
         if (fc->getScreenHeight()!=0.0) ds->setScreenHeight(fc->getScreenHeight());
@@ -383,6 +387,7 @@ int main( int argc, char **argv )
         traits->y = 0;
         traits->width = fc->getWidth();
         traits->height = fc->getHeight();
+        traits->alpha = (fc->getPixelFormat() == gsc::CaptureSettings::RGBA) ? 8 : 0;
         traits->samples = fc->getSamples();
         traits->sampleBuffers = fc->getSampleBuffers();
         traits->windowDecoration = !(fc->getOffscreen());
@@ -397,7 +402,7 @@ int main( int argc, char **argv )
             return 1;
         }
 
-
+        viewer.getCamera()->setClearColor(clearColor);
         viewer.getCamera()->setGraphicsContext(gc.get());
         viewer.getCamera()->setDisplaySettings(ds.get());
 
@@ -419,7 +424,11 @@ int main( int argc, char **argv )
             double vfov = osg::RadiansToDegrees(atan2(screenHeight/2.0f,screenDistance)*2.0);
             // double hfov = osg::RadiansToDegrees(atan2(width/2.0f,distance)*2.0);
 
-            viewer.getCamera()->setProjectionMatrixAsPerspective( vfov, screenWidth/screenHeight, 0.1, 1000.0);
+            viewer.getCamera()->setProjectionMatrixAsPerspective( vfov*fovy_multiple, (screenWidth/screenHeight)*fovx_multiple, 0.1, 1000.0);
+
+            OSG_NOTICE<<"setProjectionMatrixAsPerspective( "<<vfov*fovy_multiple<<", "<<(screenWidth/screenHeight)*fovx_multiple<<", "<<0.1<<", "<<1000.0<<");"<<std::endl;
+
+            
         }
         else
         {
@@ -430,7 +439,7 @@ int main( int argc, char **argv )
             double aspectRatioChange = newAspectRatio / aspectRatio;
             if (aspectRatioChange != 1.0)
             {
-                viewer.getCamera()->getProjectionMatrix() *= osg::Matrix::scale(1.0/aspectRatioChange,1.0,1.0);
+                viewer.getCamera()->getProjectionMatrix() *= osg::Matrix::scale(fovx_multiple/aspectRatioChange,fovy_multiple,1.0);
             }
         }
 
@@ -469,13 +478,15 @@ int main( int argc, char **argv )
                 break;
         }
     }
+
+    GLenum pixelFormat = (fc->getPixelFormat()==gsc::CaptureSettings::RGBA) ? GL_RGBA : GL_RGB;
     
 
     viewer.setThreadingModel(osgViewer::Viewer::SingleThreaded);
     viewer.realize();
 
     // set up screen shot
-    osg::ref_ptr<ScreenShot> screenShot = new ScreenShot(fc->getOutputImageFlip());;
+    osg::ref_ptr<ScreenShot> screenShot = new ScreenShot(pixelFormat, fc->getOutputImageFlip());;
     {
 
         osgViewer::Viewer::Cameras cameras;
