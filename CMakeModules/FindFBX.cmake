@@ -51,10 +51,6 @@ SET( FBX_SEARCH_PATHS
     /Applications/Autodesk/FBXSDK${FBX_VERSION_CLEAN}
 )
 
-message("FBX_LIBNAME = ${FBX_LIBNAME}")
-message("FBX_SEARCH_PATHS = ${FBX_SEARCH_PATHS}")
-message("FBX_LIBDIR = ${FBX_LIBDIR}")
-
 # search for headers & debug/release libraries
 FIND_PATH(FBX_INCLUDE_DIR "fbxsdk.h"
     PATHS ${FBX_SEARCH_PATHS}
