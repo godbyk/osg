@@ -23,6 +23,8 @@
 #include <osg/ShapeDrawable>
 #include <osg/ImageSequence>
 #include <osg/ImageUtils>
+#include <osg/ClipNode>
+#include <osg/ComputeBoundsVisitor>
 #include <osg/Notify>
 #include <osg/io_utils>
 
@@ -95,42 +97,6 @@ public:
         }
     }
 };
-
-
-HUDSettings::HUDSettings(double slideDistance, float eyeOffset, unsigned int leftMask, unsigned int rightMask):
-    _slideDistance(slideDistance),
-    _eyeOffset(eyeOffset),
-    _leftMask(leftMask),
-    _rightMask(rightMask)
-{
-}
-
-HUDSettings::~HUDSettings()
-{
-}
-
-bool HUDSettings::getModelViewMatrix(osg::Matrix& matrix, osg::NodeVisitor* nv) const
-{
-    matrix.makeLookAt(osg::Vec3d(0.0,0.0,0.0),osg::Vec3d(0.0,_slideDistance,0.0),osg::Vec3d(0.0,0.0,1.0));
-
-    if (nv->getTraversalMask()==_leftMask)
-    {
-        matrix.postMultTranslate(osg::Vec3(_eyeOffset,0.0,0.0));
-    }
-    else if (nv->getTraversalMask()==_rightMask)
-    {
-        matrix.postMultTranslate(osg::Vec3(-_eyeOffset,0.0,0.0));
-    }
-    return true;
-}
-
-bool HUDSettings::getInverseModelViewMatrix(osg::Matrix& matrix, osg::NodeVisitor* nv) const
-{
-    osg::Matrix modelView;
-    getModelViewMatrix(modelView,nv);
-    matrix.invert(modelView);
-    return true;
-}
 
 
 HUDTransform::HUDTransform(HUDSettings* hudSettings):
@@ -390,6 +356,29 @@ void SlideShowConstructor::setSlideDuration(double duration)
     }
 }
 
+
+Timeout* SlideShowConstructor::addTimeout()
+{
+    osg::ref_ptr<osgPresentation::Timeout> timeout = new osgPresentation::Timeout(_hudSettings.get());
+    if (_currentLayer.valid()) _currentLayer->addChild(timeout.get());
+    _currentLayer = timeout.get();
+    return timeout.release();
+}
+
+void SlideShowConstructor::pushCurrentLayer()
+{
+    _layerStack.push_back(_currentLayer.get());
+}
+
+void SlideShowConstructor::popCurrentLayer()
+{
+    if (!_layerStack.empty())
+    {
+        _currentLayer = _layerStack.back();
+        _layerStack.pop_back();
+    }
+}
+
 void SlideShowConstructor::addLayer(bool inheritPreviousLayers, bool defineAsBaseLayer)
 {
     if (!_slide) addSlide();
@@ -473,7 +462,7 @@ void SlideShowConstructor::addLayer(bool inheritPreviousLayers, bool defineAsBas
             osg::Vec3 localPosition = computePositionInModelCoords(_titlePositionData);
 
             osgText::Text* text = new osgText::Text;
-            text->setFont(osgText::readFontFile(_titleFontData.font, _options));
+            text->setFont(osgText::readFontFile(_titleFontData.font, _options.get()));
             text->setColor(_titleFontData.color);
             text->setCharacterSize(_titleFontData.characterSize*_slideHeight);
             text->setFontResolution(110,120);
@@ -692,7 +681,7 @@ void SlideShowConstructor::addBullet(const std::string& bullet, PositionData& po
 
     osg::Vec3 localPosition = computePositionInModelCoords(positionData);
 
-    text->setFont(osgText::readFontFile(fontData.font, _options));
+    text->setFont(osgText::readFontFile(fontData.font, _options.get()));
     text->setColor(fontData.color);
     text->setCharacterSize(fontData.characterSize*_slideHeight);
     text->setCharacterSizeMode(fontData.characterSizeMode);
@@ -740,7 +729,7 @@ void SlideShowConstructor::addParagraph(const std::string& paragraph, PositionDa
 
     osgText::Text* text = new osgText::Text;
 
-    text->setFont(osgText::readFontFile(fontData.font, _options));
+    text->setFont(osgText::readFontFile(fontData.font, _options.get()));
     text->setColor(fontData.color);
     text->setCharacterSize(fontData.characterSize*_slideHeight);
     text->setCharacterSizeMode(fontData.characterSizeMode);
@@ -1111,8 +1100,74 @@ osg::Image* SlideShowConstructor::readImage(const std::string& filename, const I
 
         image = imageSequence;
     }
-
+    if (image.valid())
+    {
+        if (imageData.delayTime>0.0) image->setUserValue("delay",imageData.delayTime);
+        if (imageData.startTime>0.0) image->setUserValue("start",imageData.startTime);
+        if (imageData.stopTime>0.0) image->setUserValue("stop",imageData.stopTime);
+    }
     return image.release();
+}
+
+struct VolumeCallback : public osg::NodeCallback
+{
+public:
+    VolumeCallback(osg::ImageStream* movie, const std::string& str):
+        _movie(movie),
+        _source(str) {}
+
+    virtual void operator()(osg::Node* node, osg::NodeVisitor* nv)
+    {
+        PropertyReader pr(nv->getNodePath(), _source);
+
+        float volume=0.0f;
+        pr>>volume;
+
+        if (pr.ok())
+        {
+            OSG_NOTICE<<"VolumeCallback : volume="<<volume<<", from "<<_source<<std::endl;
+            _movie->setVolume(volume);
+        }
+        else
+        {
+            OSG_NOTICE<<"Problem in reading, VolumeCallback : volume="<<volume<<std::endl;
+        }
+
+
+        // note, callback is responsible for scenegraph traversal so
+        // they must call traverse(node,nv) to ensure that the
+        // scene graph subtree (and associated callbacks) are traversed.
+        traverse(node, nv);
+    }
+
+protected:
+
+    osg::ref_ptr<osg::ImageStream> _movie;
+    std::string  _source;
+};
+
+void SlideShowConstructor::setUpMovieVolume(osg::Node* subgraph, osg::ImageStream* imageStream, const ImageData& imageData)
+{
+    if (containsPropertyReference(imageData.volume))
+    {
+        subgraph->addUpdateCallback(new VolumeCallback(imageStream, imageData.volume));
+    }
+    else
+    {
+        float volume;
+        std::istringstream sstream(imageData.volume);
+        sstream>>volume;
+
+        if (!sstream.fail())
+        {
+            OSG_NOTICE<<"Setting volume "<<volume<<std::endl;
+            imageStream->setVolume( volume );
+        }
+        else
+        {
+            OSG_NOTICE<<"Invalid volume setting: "<<imageData.volume<<std::endl;
+        }
+    }
 }
 
 void SlideShowConstructor::addImage(const std::string& filename, const PositionData& positionData, const ImageData& imageData)
@@ -1207,6 +1262,12 @@ void SlideShowConstructor::addImage(const std::string& filename, const PositionD
         SetToTransparentBin sttb;
         subgraph->accept(sttb);
         pictureStateSet->setMode(GL_BLEND, osg::StateAttribute::ON);
+    }
+
+
+    if (imageStream && !imageData.volume.empty()) 
+    {
+        setUpMovieVolume(subgraph, imageStream, imageData);
     }
 
     osg::ImageSequence* imageSequence = dynamic_cast<osg::ImageSequence*>(image.get());
@@ -1411,6 +1472,16 @@ void SlideShowConstructor::addStereoImagePair(const std::string& filenameLeft, c
     osg::Group* subgraph = new osg::Group;
     subgraph->addChild(pictureLeft);
     subgraph->addChild(pictureRight);
+
+    if (imageStreamLeft && !imageDataLeft.volume.empty())
+    {
+        setUpMovieVolume(subgraph, imageStreamLeft, imageDataLeft);
+    }
+
+    if (imageStreamRight && !imageDataRight.volume.empty())
+    {
+        setUpMovieVolume(subgraph, imageStreamRight, imageDataRight);
+    }
 
     osg::ImageSequence* imageSequence = dynamic_cast<osg::ImageSequence*>(imageLeft.get());
     if (imageSequence)
@@ -1769,6 +1840,63 @@ std::string SlideShowConstructor::findFileAndRecordPath(const std::string& filen
 
 }
 
+
+struct ClipRegionCallback : public osg::NodeCallback
+{
+public:
+    ClipRegionCallback(const osg::Matrixd& originalMatrix, const std::string& str):
+        _matrix(originalMatrix),
+        _source(str) {}
+
+    virtual void operator()(osg::Node* node, osg::NodeVisitor* nv)
+    {
+        osg::MatrixTransform* transform = dynamic_cast<osg::MatrixTransform*>(node);
+        if (transform)
+        {
+            PropertyReader pr(nv->getNodePath(), _source);
+
+            float xMin=0.0;
+            float yMin=0.0;
+            float zMin=0.0;
+            float xMax=1.0;
+            float yMax=1.0;
+            float zMax=1.0;
+
+            pr>>xMin>>yMin>>zMin>>xMax>>yMax>>zMax;
+
+            if (pr.ok())
+            {
+                OSG_NOTICE<<"ClipRegionCallback : xMin="<<xMin<<", yMin="<<yMin<<", zMin="<<zMin<<", xMax="<<xMax<<", yMax="<<yMax<<", zMax="<<zMax<<std::endl;
+            }
+            else
+            {
+                OSG_NOTICE<<"Problem in reading, ClipRegionCallback : xMin="<<xMin<<", yMin="<<yMin<<", zMin="<<zMin<<", xMax="<<xMax<<", yMax="<<yMax<<", zMax="<<zMax<<std::endl;
+            }
+
+            osg::Matrixd tm = osg::Matrix::scale(xMax-xMin, yMax-yMin, zMax-zMin) *
+                              osg::Matrix::translate(xMin,yMin,zMin);
+
+            transform->setMatrix(tm * _matrix);
+
+        }
+        else
+        {
+            OSG_NOTICE<<"ClipRegionCallback not attached to MatrixTransform, unable to update any values."<<std::endl;
+        }
+
+        // note, callback is responsible for scenegraph traversal so
+        // they must call traverse(node,nv) to ensure that the
+        // scene graph subtree (and associated callbacks) are traversed.
+        traverse(node, nv);
+    }
+
+protected:
+
+    osg::Matrixd _matrix;
+    std::string  _source;
+};
+
+
 void SlideShowConstructor::addModel(const std::string& filename, const PositionData& positionData, const ModelData& modelData)
 {
     OSG_INFO<<"SlideShowConstructor::addModel("<<filename<<")"<<std::endl;
@@ -1780,7 +1908,7 @@ void SlideShowConstructor::addModel(const std::string& filename, const PositionD
         options->setOptionString(modelData.options);
     }
 
-    osg::Node* subgraph = 0;
+    osg::ref_ptr<osg::Node> subgraph;
 
     if (filename=="sphere")
     {
@@ -1802,9 +1930,58 @@ void SlideShowConstructor::addModel(const std::string& filename, const PositionD
         if (subgraph) recordOptionsFilePath(options.get());
     }
 
-    if (subgraph)
+    if (!modelData.region.empty())
     {
-        addModel(subgraph, positionData, modelData);
+        osg::ref_ptr<osg::ClipNode> clipnode = new osg::ClipNode;
+        clipnode->createClipBox(osg::BoundingBox(0.0,0.0,0.0,1.0,1.0,1.0),0);
+        clipnode->setCullingActive(false);
+        
+        osg::ref_ptr<osg::MatrixTransform> transform = new osg::MatrixTransform;
+        transform->addChild(clipnode.get());
+
+        osg::ref_ptr<osg::Group> group = new osg::Group;
+        group->addChild(subgraph.get());
+        group->addChild(transform.get());
+        
+        //clipnode->setStateSetModes(*(group->getOrCreateStateSet()), osg::StateAttribute::ON);
+        group->setStateSet(clipnode->getStateSet());
+
+        osg::ComputeBoundsVisitor cbbv(osg::NodeVisitor::TRAVERSE_ACTIVE_CHILDREN);
+        subgraph->accept(cbbv);
+        osg::BoundingBox bb = cbbv.getBoundingBox();
+        double width = bb.xMax()-bb.xMin();
+        double length = bb.yMax()-bb.yMin();
+        double height = bb.zMax()-bb.zMin();
+
+        osg::Matrixd matrix = osg::Matrixd::translate(-0.5,-0.5,-0.5)*osg::Matrixd::scale(width,length,height)*osg::Matrixd::translate(bb.center());
+        transform->setMatrix(matrix);
+
+        if (containsPropertyReference(modelData.region))
+        {
+            transform->addUpdateCallback(new ClipRegionCallback(matrix, modelData.region));
+        }
+        else
+        {
+            double region[6];
+            std::istringstream sstream(modelData.region);
+            sstream>>region[0]>>region[1]>>region[2]>>region[3]>>region[4]>>region[5];
+
+            osg::Matrix tm = osg::Matrix::scale(region[3]-region[0], region[4]-region[1], region[5]-region[2]) *
+                             osg::Matrix::translate(region[0],region[1],region[2]);
+
+            transform->setMatrix( tm * matrix );
+        }
+
+        subgraph = group;
+
+        osgDB::writeNodeFile(*subgraph, "output.osgt");
+        
+    }
+
+    
+    if (subgraph.valid())
+    {
+        addModel(subgraph.get(), positionData, modelData);
     }
 
     OSG_INFO<<"end of SlideShowConstructor::addModel("<<filename<<")"<<std::endl<<std::endl;
@@ -2395,19 +2572,19 @@ void SlideShowConstructor::addVolume(const std::string& filename, const Position
 
         
         osgVolume::AlphaFuncProperty* ap = new osgVolume::AlphaFuncProperty(0.1f);
-        setUpVolumeScalarProperty(tile, ap, volumeData.cutoffValue);
+        setUpVolumeScalarProperty(tile.get(), ap, volumeData.cutoffValue);
 
         osgVolume::TransparencyProperty* tp = new osgVolume::TransparencyProperty(1.0f);
-        setUpVolumeScalarProperty(tile, tp, volumeData.alphaValue);
+        setUpVolumeScalarProperty(tile.get(), tp, volumeData.alphaValue);
 
         osgVolume::SampleDensityProperty* sd = new osgVolume::SampleDensityProperty(0.005);
-        setUpVolumeScalarProperty(tile, sd, volumeData.sampleDensityValue);
+        setUpVolumeScalarProperty(tile.get(), sd, volumeData.sampleDensityValue);
 
         osgVolume::SampleDensityWhenMovingProperty* sdm = 0;
         if (!volumeData.sampleDensityWhenMovingValue.empty())
         {
             sdm = new osgVolume::SampleDensityWhenMovingProperty(0.005);
-            setUpVolumeScalarProperty(tile, sdm, volumeData.sampleDensityWhenMovingValue);
+            setUpVolumeScalarProperty(tile.get(), sdm, volumeData.sampleDensityWhenMovingValue);
         }
         
         osgVolume::TransferFunctionProperty* tfp = volumeData.transferFunction.valid() ? new osgVolume::TransferFunctionProperty(volumeData.transferFunction.get()) : 0;
@@ -2445,7 +2622,7 @@ void SlideShowConstructor::addVolume(const std::string& filename, const Position
 
             
             osgVolume::IsoSurfaceProperty* isp = new osgVolume::IsoSurfaceProperty(0.1);
-            setUpVolumeScalarProperty(tile, isp, volumeData.alphaValue);
+            setUpVolumeScalarProperty(tile.get(), isp, volumeData.alphaValue);
             cp->addProperty(isp);
 
             if (sdm) cp->addProperty(sdm);

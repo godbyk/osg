@@ -50,8 +50,11 @@ const char vert_shader_str[] =
 "    float l = (base-d2)/base;\n"
 "    float half_l = l*0.5;\n"
 "\n"
-"    gl_FrontColor = vec4( (dv.x+1.0)*half_l, (dv.y+1.0)*half_l, (dv.z+1.0)*half_l, 1.0);\n"
+"    // gl_FrontColor = vec4( (dv.x+1.0)*half_l, (dv.y+1.0)*half_l, (dv.z+1.0)*half_l, 1.0);\n"
+"    // gl_FrontColor = vec4( abs(dv.x)*half_l, abs(dv.y)*half_l, abs(dv.z)*half_l, 1.0);\n"
+"    gl_FrontColor = vec4( abs(dv.x), abs(dv.y), abs(dv.z), 1.0);\n"
 "    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;\n"
+"    gl_ClipVertex = gl_ModelViewMatrix * gl_Vertex;\n"
 "}\n";
 
 
@@ -69,7 +72,7 @@ struct AssignDirectionColour
         if (!colours)
         {
             colours = new osg::Vec4Array;
-            geometry->setColorArray(colours);
+            geometry->setColorArray(colours.get());
         }
         geometry->setColorBinding(osg::Geometry::BIND_PER_VERTEX);
         colours->resize(vertices->size(), osg::Vec4(0.0,0.0,0.0,0.0));
@@ -79,7 +82,7 @@ struct AssignDirectionColour
         if (!normals)
         {
             normals = new osg::Vec3Array;
-            geometry->setNormalArray(normals);
+            geometry->setNormalArray(normals.get());
         }
         geometry->setNormalBinding(osg::Geometry::BIND_PER_VERTEX);
         normals->resize(vertices->size(), osg::Vec3(0.0,0.0,0.0));
@@ -172,7 +175,7 @@ struct AssignDirectionColour
             vertexShader = new osg::Shader(osg::Shader::VERTEX, vert_shader_str);
         }
 
-        program->addShader(vertexShader);
+        program->addShader(vertexShader.get());
 
         stateset->setAttribute(program.get());
     }

@@ -170,24 +170,60 @@ struct InteractiveImageSequenceOperator : public ObjectOperator
 struct ImageStreamOperator : public ObjectOperator
 {
     ImageStreamOperator(osg::ImageStream* imageStream):
-        _imageStream(imageStream) {}
+        _imageStream(imageStream),
+        _delayTime(0.0),
+        _startTime(0.0),
+        _stopTime(-1.0),
+        _timeOfLastReset(0.0),
+        _started(false),
+        _stopped(false)
+    {
+        _imageStream->getUserValue("delay",_delayTime);
+        _imageStream->getUserValue("start",_startTime);
+        _imageStream->getUserValue("stop",_stopTime);
+    }
 
     virtual void* ptr() const { return _imageStream.get(); }
 
+
     virtual void enter(SlideEventHandler* seh)
     {
-        OSG_INFO<<"enter() : _imageStream->rewind() + play"<<std::endl;
+        OSG_NOTICE<<"enter() : _imageStream->rewind() + play"<<std::endl;
 
         reset(seh);
     }
 
+    virtual void frame(SlideEventHandler* seh)
+    {
+        if (_delayTime!=0.0 && !_started && !_stopped)
+        {
+            double timeSinceLastRest = seh->getReferenceTime()-_timeOfLastReset;
+            if (timeSinceLastRest>_delayTime)
+            {
+                OSG_NOTICE<<"ImageStreamOperator::frame("<<seh->getReferenceTime()<<") calling start"<<std::endl;
+                start(seh);
+            }
+        }
+        if (_stopTime>0.0 && _started && !_stopped)
+        {
+            double timeSinceLastReset = seh->getReferenceTime()-_timeOfLastReset;
+            double timeSinceStart = (timeSinceLastReset-_delayTime);
+            if ((timeSinceStart+_startTime)>_stopTime)
+            {
+                OSG_NOTICE<<"ImageStreamOperator::frame("<<seh->getReferenceTime()<<") calling stop"<<std::endl;
+                stop(seh);
+            }
+        }
+    }
+
     virtual void maintain(SlideEventHandler*)
     {
+        OSG_NOTICE<<"ImageStreamOperator::maintain()"<<std::endl;
     }
 
     virtual void leave(SlideEventHandler*)
     {
-       OSG_INFO<<"leave() : _imageStream->pause()"<<std::endl;
+       OSG_NOTICE<<"leave() : _imageStream->pause()"<<std::endl;
 
         _imageStream->pause();
     }
@@ -196,30 +232,62 @@ struct ImageStreamOperator : public ObjectOperator
     {
        OSG_INFO<<"_imageStream->setPause("<<pause<<")"<<std::endl;
 
-        if (pause) _imageStream->pause();
-        else _imageStream->play();
+        if (_started)
+        {
+            if (pause) _imageStream->pause();
+            else _imageStream->play();
+        }
     }
 
-    virtual void reset(SlideEventHandler*)
+    virtual void reset(SlideEventHandler* seh)
     {
-        osg::ImageStream::StreamStatus previousStatus = _imageStream->getStatus();
+        OSG_NOTICE<<"ImageStreamOperator::reset()"<<std::endl;
 
-        _imageStream->rewind();
+        _timeOfLastReset = seh->getReferenceTime();
+        _stopped = false;
+        
+        if (_delayTime==0.0)
+        {
+            start(seh);
+        }
+    }
 
+    void start(SlideEventHandler*)
+    {
+        if (_started) return;
+
+        _started = true;
+        _stopped = false;
+        
+        if (_startTime!=0.0) _imageStream->seek(_startTime);
+        else _imageStream->rewind();
 
         //_imageStream->setVolume(previousVolume);
 
-        if(previousStatus==osg::ImageStream::PLAYING)
-        {
-            _imageStream->play();
-        }
+        _imageStream->play();
 
         // add a delay so that movie thread has a chance to do the rewind
         float microSecondsToDelay = SlideEventHandler::instance()->getTimeDelayOnNewSlideWithMovies() * 1000000.0f;
         OpenThreads::Thread::microSleep(static_cast<unsigned int>(microSecondsToDelay));
     }
 
+    void stop(SlideEventHandler* seh)
+    {
+        if (!_started) return;
+
+        _started = false;
+        _stopped = true;
+        
+        _imageStream->pause();
+    }
+
     osg::ref_ptr<osg::ImageStream>  _imageStream;
+    double      _delayTime;
+    double      _startTime;
+    double      _stopTime;
+    double      _timeOfLastReset;
+    bool        _started;
+    bool        _stopped;
 };
 
 struct CallbackOperator : public ObjectOperator
@@ -398,6 +466,8 @@ public:
         osg::NodeVisitor(tm),
         _operatorList(operatorList) {}
 
+    META_NodeVisitor(osgPresentation, FindOperatorsVisitor)
+
     void apply(osg::Node& node)
     {
         if (node.getStateSet()) process(node.getStateSet());
@@ -525,6 +595,16 @@ void ActiveOperators::collect(osg::Node* incommingNode, osg::NodeVisitor::Traver
     {
         ObjectOperator* curr = itr->get();
         if (_previous.count(curr)==0) _incomming.insert(curr);
+    }
+}
+
+void ActiveOperators::frame(SlideEventHandler* seh)
+{
+    for(OperatorList::iterator itr = _current.begin();
+        itr != _current.end();
+        ++itr)
+    {
+        (*itr)->frame(seh);
     }
 }
 
@@ -775,7 +855,8 @@ SlideEventHandler::SlideEventHandler(osgViewer::Viewer* viewer):
     _slideSwitch(0),
     _activeLayer(0),
     _firstTraversal(true),
-    _previousTime(-1.0f),
+    _referenceTime(-1.0),
+    _previousTime(-1.0),
     _timePerSlide(1.0),
     _autoSteppingActive(false),
     _loopPresentation(false),
@@ -919,6 +1000,8 @@ bool SlideEventHandler::handle(const osgGA::GUIEventAdapter& ea,osgGA::GUIAction
 
     if (ea.getHandled()) return false;
 
+    _referenceTime = ea.getTime();
+    
     switch(ea.getEventType())
     {
         case(osgGA::GUIEventAdapter::FRAME):
@@ -952,6 +1035,8 @@ bool SlideEventHandler::handle(const osgGA::GUIEventAdapter& ea,osgGA::GUIAction
                     }
                 }
             }
+            _activeOperators.frame(this);
+
             return false;
         }
 

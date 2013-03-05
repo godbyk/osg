@@ -377,6 +377,29 @@ typedef char GLchar;
 #define GL_INT_SAMPLER_BUFFER             0x8DD0
 #define GL_UNSIGNED_INT_SAMPLER_2D_RECT   0x8DD5
 #define GL_UNSIGNED_INT_SAMPLER_BUFFER    0x8DD8
+#define GL_TEXTURE_BUFFER                 0x8C2A
+#define GL_MAX_TEXTURE_BUFFER_SIZE        0x8C2B
+#define GL_TEXTURE_BINDING_BUFFER         0x8C2C
+#define GL_TEXTURE_BUFFER_DATA_STORE_BINDING 0x8C2D
+#define GL_TEXTURE_RECTANGLE              0x84F5
+#define GL_TEXTURE_BINDING_RECTANGLE      0x84F6
+#define GL_PROXY_TEXTURE_RECTANGLE        0x84F7
+#define GL_MAX_RECTANGLE_TEXTURE_SIZE     0x84F8
+#define GL_RED_SNORM                      0x8F90
+#define GL_RG_SNORM                       0x8F91
+#define GL_RGB_SNORM                      0x8F92
+#define GL_RGBA_SNORM                     0x8F93
+#define GL_R8_SNORM                       0x8F94
+#define GL_RG8_SNORM                      0x8F95
+#define GL_RGB8_SNORM                     0x8F96
+#define GL_RGBA8_SNORM                    0x8F97
+#define GL_R16_SNORM                      0x8F98
+#define GL_RG16_SNORM                     0x8F99
+#define GL_RGB16_SNORM                    0x8F9A
+#define GL_RGBA16_SNORM                   0x8F9B
+#define GL_SIGNED_NORMALIZED              0x8F9C
+#define GL_PRIMITIVE_RESTART              0x8F9D
+#define GL_PRIMITIVE_RESTART_INDEX        0x8F9E
 #endif
 
 #ifndef GL_VERSION_4_0
@@ -417,6 +440,43 @@ typedef char GLchar;
 #define GL_ACTIVE_ATOMIC_COUNTER_BUFFERS  0x92D9
 #define GL_UNIFORM_ATOMIC_COUNTER_BUFFER_INDEX 0x92DA
 #define GL_UNSIGNED_INT_ATOMIC_COUNTER    0x92DB
+#endif
+
+// ARB_compute_shader
+#ifndef GL_ARB_compute_shader
+#define GL_COMPUTE_SHADER                 0x91B9
+#define GL_MAX_COMPUTE_UNIFORM_BLOCKS     0x91BB
+#define GL_MAX_COMPUTE_TEXTURE_IMAGE_UNITS 0x91BC
+#define GL_MAX_COMPUTE_IMAGE_UNIFORMS     0x91BD
+#define GL_MAX_COMPUTE_SHARED_MEMORY_SIZE 0x8262
+#define GL_MAX_COMPUTE_UNIFORM_COMPONENTS 0x8263
+#define GL_MAX_COMPUTE_ATOMIC_COUNTER_BUFFERS 0x8264
+#define GL_MAX_COMPUTE_ATOMIC_COUNTERS    0x8265
+#define GL_MAX_COMBINED_COMPUTE_UNIFORM_COMPONENTS 0x8266
+#define GL_MAX_COMPUTE_LOCAL_INVOCATIONS  0x90EB
+#define GL_MAX_COMPUTE_WORK_GROUP_COUNT   0x91BE
+#define GL_MAX_COMPUTE_WORK_GROUP_SIZE    0x91BF
+#define GL_COMPUTE_LOCAL_WORK_SIZE        0x8267
+#define GL_UNIFORM_BLOCK_REFERENCED_BY_COMPUTE_SHADER 0x90EC
+#define GL_ATOMIC_COUNTER_BUFFER_REFERENCED_BY_COMPUTE_SHADER 0x90ED
+#define GL_DISPATCH_INDIRECT_BUFFER       0x90EE
+#define GL_DISPATCH_INDIRECT_BUFFER_BINDING 0x90EF
+#define GL_COMPUTE_SHADER_BIT             0x00000020
+#endif
+
+#ifndef GL_ARB_depth_clamp
+#define GL_DEPTH_CLAMP                    0x864F
+#endif
+
+#ifndef GL_ARB_provoking_vertex
+#define GL_QUADS_FOLLOW_PROVOKING_VERTEX_CONVENTION 0x8E4C
+#define GL_FIRST_VERTEX_CONVENTION        0x8E4D
+#define GL_LAST_VERTEX_CONVENTION         0x8E4E
+#define GL_PROVOKING_VERTEX               0x8E4F
+#endif
+
+#ifndef GL_ARB_seamless_cube_map
+#define GL_TEXTURE_CUBE_MAP_SEAMLESS      0x884F
 #endif
 
 namespace osg {
@@ -651,6 +711,8 @@ class OSG_EXPORT GL2Extensions : public osg::Referenced
         // ARB_shader_atomic_counters
         void glGetActiveAtomicCounterBufferiv( GLuint program, GLuint bufferIndex, GLenum pname, GLint* params ) const;
 
+        // ARB_compute_shader
+        void glDispatchCompute( GLuint numGroupsX, GLuint numGroupsY, GLuint numGroupsZ ) const;
 
     protected:
         ~GL2Extensions() {}
@@ -817,6 +879,7 @@ class OSG_EXPORT GL2Extensions : public osg::Referenced
         typedef void (GL_APIENTRY * UniformMatrix3x4dvProc)( GLint location, GLsizei count, GLboolean transpose, const GLdouble* value );
         typedef void (GL_APIENTRY * UniformMatrix4x3dvProc)( GLint location, GLsizei count, GLboolean transpose, const GLdouble* value );
         typedef void (GL_APIENTRY * GetActiveAtomicCounterBufferivProc)( GLuint program, GLuint bufferIndex, GLenum pname, GLint* params );
+        typedef void (GL_APIENTRY * DispatchComputeProc)( GLuint numGroupsX, GLuint numGroupsY, GLuint numGroupsZ );
 
         BlendEquationSeparateProc _glBlendEquationSeparate;
         DrawBuffersProc _glDrawBuffers;
@@ -982,6 +1045,9 @@ class OSG_EXPORT GL2Extensions : public osg::Referenced
 
         // ARB_shader_atomic_counters
         GetActiveAtomicCounterBufferivProc _glGetActiveAtomicCounterBufferiv;
+
+        // ARB_compute_shader
+        DispatchComputeProc _glDispatchCompute;
 };
 
 }

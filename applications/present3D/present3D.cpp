@@ -311,8 +311,7 @@ void addDeviceTo(osgViewer::Viewer& viewer, const std::string& device_name)
     if (dev.valid())
     {
         OSG_INFO << "Adding Device : " << device_name << std::endl;
-        if (dev->getCapabilities() & osgGA::Device::RECEIVE_EVENTS)
-            viewer.addDevice(dev.get());
+        viewer.addDevice(dev.get());
         
         if (dev->getCapabilities() & osgGA::Device::SEND_EVENTS)
             viewer.getEventHandlers().push_front(new ForwardToDeviceEventHandler(dev.get()));
@@ -540,10 +539,19 @@ int main( int argc, char **argv )
     std::string cursorFileName( p3dCursor ? p3dCursor : "");
     while (arguments.read("--cursor",cursorFileName)) {}
 
+    const char* p3dShowCursor = getenv("P3D_SHOW_CURSOR");
+    std::string showCursor( p3dShowCursor ? p3dShowCursor : "YES");
+    while (arguments.read("--show-cursor")) { showCursor="YES"; }
+    while (arguments.read("--hide-cursor")) { showCursor="NO"; }
+
+    bool hideCursor = (showCursor=="No" || showCursor=="NO" || showCursor=="no");
 
     while (arguments.read("--set-viewer")) { doSetViewer = true; }
     
     while (arguments.read("--no-set-viewer")) { doSetViewer = false; }
+
+    // if we want to hide the cursor override the custom cursor.
+    if (hideCursor) cursorFileName.clear();
     
 
     // cluster related entries.
@@ -574,7 +582,8 @@ int main( int argc, char **argv )
 
     {
         // set update hte default traversal mode settings for update visitor
-        osg::NodeVisitor::TraversalMode updateTraversalMode = viewer.getUpdateVisitor()->getTraversalMode();
+        // default to osg::NodeVisitor::TRAVERSE_ACTIVE_CHILDREN.
+        osg::NodeVisitor::TraversalMode updateTraversalMode = osg::NodeVisitor::TRAVERSE_ACTIVE_CHILDREN; // viewer.getUpdateVisitor()->getTraversalMode();
 
         const char* p3dUpdateStr = getenv("P3D_UPDATE");
         if (p3dUpdateStr)
@@ -836,7 +845,7 @@ int main( int argc, char **argv )
     }
     
 
-    if (!cursorFileName.empty())
+    if (!cursorFileName.empty() || hideCursor)
     {
         // have to add a frame in here to avoid problems with X11 threading issue on switching off the cursor
         // not yet sure why it makes a difference, but it at least fixes the crash that would otherwise occur

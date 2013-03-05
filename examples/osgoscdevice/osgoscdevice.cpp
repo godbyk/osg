@@ -386,7 +386,7 @@ public:
                 
                 osgViewer::View* view = dynamic_cast<osgViewer::View*>(&aa);
                 if (view)
-                    view->addEventHandler(new PickHandler(_device));
+                    view->addEventHandler(new PickHandler(_device.get()));
                 return true;
             }
         }
@@ -402,6 +402,9 @@ int main( int argc, char **argv )
     osg::ArgumentParser arguments(&argc,argv);
     
     arguments.getApplicationUsage()->addCommandLineOption("--zeroconf","uses zeroconf to advertise the osc-plugin and to discover it");
+    arguments.getApplicationUsage()->addCommandLineOption("--sender","create a view which sends its events via osc");
+    arguments.getApplicationUsage()->addCommandLineOption("--recevier","create a view which receive its events via osc");
+    
 
 
     // read the scene from the list of file specified commandline args.
@@ -414,13 +417,16 @@ int main( int argc, char **argv )
     }
     
     bool use_zeroconf(false);
+    bool use_sender(false);
+    bool use_receiver(false);
     if(arguments.find("--zeroconf") > 0) { use_zeroconf = true; }
-
+    if(arguments.find("--sender") > 0) { use_sender = true; }
+    if(arguments.find("--receiver") > 0) { use_receiver = true; }
     // construct the viewer.
     osgViewer::CompositeViewer viewer(arguments);
     
     // receiver view
-    {
+    if (use_receiver) {
         osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
         traits->x = 600;
         traits->y = 100;
@@ -462,7 +468,7 @@ int main( int argc, char **argv )
         osg::ref_ptr<osgGA::Device> device = osgDB::readFile<osgGA::Device>("0.0.0.0:9000.receiver.osc");
         if (device.valid() && (device->getCapabilities() & osgGA::Device::RECEIVE_EVENTS))
         {
-            view->addDevice(device);
+            view->addDevice(device.get());
             
             // add a zeroconf device, advertising the osc-device
             if(use_zeroconf)
@@ -480,7 +486,7 @@ int main( int argc, char **argv )
     }
 
     // sender view
-    {
+    if(use_sender) {
         osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
         traits->x = 100;
         traits->y = 100;
@@ -499,7 +505,7 @@ int main( int argc, char **argv )
         viewer.addView(view);
         
         osg::Group* g = new osg::Group();
-        g->addChild(scene);
+        g->addChild(scene.get());
         g->addChild(createHUD());
         view->setSceneData(g);
         view->getCamera()->setName("Cam one");
@@ -529,10 +535,10 @@ int main( int argc, char **argv )
             if (device.valid() && (device->getCapabilities() & osgGA::Device::SEND_EVENTS))
             {
                 // add as first event handler, so it gets ALL events ...
-                view->getEventHandlers().push_front(new ForwardToDeviceEventHandler(device));
+                view->getEventHandlers().push_front(new ForwardToDeviceEventHandler(device.get()));
                 
                 // add the demo-pick-event-handler
-                view->addEventHandler(new PickHandler(device));
+                view->addEventHandler(new PickHandler(device.get()));
             }
             else {
                 OSG_WARN << "could not open osc-device, sending will not work" << std::endl;

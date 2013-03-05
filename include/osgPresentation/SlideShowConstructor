@@ -34,28 +34,11 @@
 #include <osgPresentation/AnimationMaterial>
 #include <osgPresentation/SlideEventHandler>
 #include <osgPresentation/PropertyManager>
+#include <osgPresentation/Timeout>
 
 namespace osgPresentation
 {
 
-class OSGPRESENTATION_EXPORT HUDSettings : public osg::Referenced
-{
-    public:
-        HUDSettings(double slideDistance, float eyeOffset, unsigned int leftMask, unsigned int rightMask);
-
-        virtual bool getModelViewMatrix(osg::Matrix& matrix, osg::NodeVisitor* nv) const;
-
-        virtual bool getInverseModelViewMatrix(osg::Matrix& matrix, osg::NodeVisitor* nv) const;
-
-        double          _slideDistance;
-        double          _eyeOffset;
-        unsigned int    _leftMask;
-        unsigned int    _rightMask;
-
-protected:
-
-        virtual ~HUDSettings();
-};
 
 
 class OSGPRESENTATION_EXPORT HUDTransform : public osg::Transform
@@ -231,6 +214,7 @@ public:
     {
         ModelData() {}
 
+        std::string region;
         std::string effect;
         std::string options;
     };
@@ -251,7 +235,11 @@ public:
             imageSequence(false),
             imageSequencePagingMode(osg::ImageSequence::PAGE_AND_DISCARD_USED_IMAGES),
             imageSequenceInteractionMode(PLAY_AUTOMATICALLY_LIKE_MOVIE),
-            blendingHint(USE_IMAGE_ALPHA)
+            blendingHint(USE_IMAGE_ALPHA),
+            delayTime(0.0),
+            startTime(0.0),
+            stopTime(-1.0),
+            volume("")
         {}
 
         std::string                     options;
@@ -284,7 +272,12 @@ public:
             ON
         };
         
-        BlendingHint blendingHint;
+        BlendingHint    blendingHint;
+
+        double          delayTime;
+        double          startTime;
+        double          stopTime;
+        std::string     volume;
 
     };
 
@@ -388,6 +381,7 @@ public:
 
     void setSlideDuration(double duration);
 
+    Timeout* addTimeout();
 
     void addLayer(bool inheritPreviousLayers=true, bool defineAsBaseLayer=false);
 
@@ -473,6 +467,9 @@ public:
 
     osg::Switch* getCurrentSlide() { return _slide.get(); }
 
+    void pushCurrentLayer();
+    void popCurrentLayer();
+    
     osg::Group* getCurrentLayer() { return _currentLayer.get(); }
 
     void setLoopPresentation(bool loop) { _loopPresentation = loop; }
@@ -491,6 +488,7 @@ protected:
     void findImageStreamsAndAddCallbacks(osg::Node* node);
 
     osg::Geometry* createTexturedQuadGeometry(const osg::Vec3& pos, const osg::Vec4& rotation, float width,float height, osg::Image* image, bool& usedTextureRectangle);
+    void setUpMovieVolume(osg::Node* subgraph, osg::ImageStream* imageStream, const ImageData& imageData);
 
     osg::Vec3 computePositionInModelCoords(const PositionData& positionData) const;
     void updatePositionFromInModelCoords(const osg::Vec3& vertex, PositionData& positionData) const;
@@ -569,6 +567,8 @@ protected:
 
     osg::ref_ptr<osg::Group>        _previousLayer;
     osg::ref_ptr<osg::Group>        _currentLayer;
+    typedef std::vector< osg::ref_ptr<osg::Group> > LayerStack;
+    LayerStack                      _layerStack;
 
     osg::ref_ptr<FilePathData>      _filePathData;
 

@@ -1355,7 +1355,8 @@ void Optimizer::RemoveEmptyNodesVisitor::apply(osg::Group& group)
     {
         // only remove empty groups, but not empty occluders.
         if (group.getNumChildren()==0 && isOperationPermissibleForObject(&group) &&
-            (typeid(group)==typeid(osg::Group) || (dynamic_cast<osg::Transform*>(&group) && !dynamic_cast<osg::CameraView*>(&group))))
+            (typeid(group)==typeid(osg::Group) || (dynamic_cast<osg::Transform*>(&group) && !dynamic_cast<osg::CameraView*>(&group))) &&
+            (group.getNumChildrenRequiringUpdateTraversal()==0 && group.getNumChildrenRequiringEventTraversal()==0) )
         {
             _redundantNodeList.insert(&group);
         }
@@ -4630,6 +4631,8 @@ void Optimizer::FlattenStaticTransformsDuplicatingSharedSubgraphsVisitor::apply(
         if(parent_group)
         {
             parent_group->replaceChild(&group, new_group);
+            // also replace the node in the nodepath
+            _nodePath[nodepathsize-1] = new_group;
             // traverse the new Group
             traverse(*(new_group));
         }
@@ -4671,6 +4674,8 @@ void Optimizer::FlattenStaticTransformsDuplicatingSharedSubgraphsVisitor::apply(
         if(parent_group)
         {
             parent_group->replaceChild(&transform, group.get());
+            // also replace the node in the nodepath
+            _nodePath[nodepathsize-1] = group.get();
             // traverse the new Group
             traverse(*(group.get()));
         }
@@ -4705,7 +4710,8 @@ void Optimizer::FlattenStaticTransformsDuplicatingSharedSubgraphsVisitor::apply(
         if(parent_group)
         {
             parent_group->replaceChild(&lod, new_lod.get());
-
+            // also replace the node in the nodepath
+            _nodePath[nodepathsize-1] = new_lod.get();
             // move center point
             if(!_matrixStack.empty())
                 new_lod->setCenter(new_lod->getCenter() * _matrixStack.back());
